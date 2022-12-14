@@ -41,6 +41,7 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.SystemClock;
 import android.os.SystemProperties;
+import android.os.Trace;
 import android.os.WorkSource;
 import android.provider.Settings;
 import android.sysprop.TelephonyProperties;
@@ -186,7 +187,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
 
     int mLastRadioPowerResult = RadioError.NONE;
 
-    boolean mHidlSetResponseFunctionsCalled = false;
+    boolean mIsRadioProxyInitialized = false;
 
     // When we are testing emergency calls using ril.test.emergencynumber, this will trigger test
     // ECbM when the call is ended.
@@ -354,7 +355,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                             + ", service = " + serviceToString(service) + ", service cookie = "
                             + mServiceCookies.get(service));
                     if ((long) msg.obj == mServiceCookies.get(service).get()) {
-                        mHidlSetResponseFunctionsCalled = false;
+                        mIsRadioProxyInitialized = false;
                         resetProxyAndRequestList(service);
                     }
                     break;
@@ -366,7 +367,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                             + ", service = " + serviceToString(aidlService) + ", cookie = "
                             + mServiceCookies.get(aidlService));
                     if (obj.get() == mServiceCookies.get(aidlService).get()) {
-                        mHidlSetResponseFunctionsCalled = false;
+                        mIsRadioProxyInitialized = false;
                         resetProxyAndRequestList(aidlService);
                     }
                     break;
@@ -526,7 +527,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
             }
 
             if (serviceBound) {
-                mHidlSetResponseFunctionsCalled = false;
+                mIsRadioProxyInitialized = false;
                 for (int service = MIN_SERVICE_IDX; service <= MAX_SERVICE_IDX; service++) {
                     resetProxyAndRequestList(service);
                 }
@@ -668,10 +669,10 @@ public class RIL extends BaseCommands implements CommandsInterface {
                 }
 
                 if (mRadioProxy != null) {
-                    mRadioProxy.linkToDeath(mRadioProxyDeathRecipient,
-                            mServiceCookies.get(RADIO_SERVICE).incrementAndGet());
-                    if (!mHidlSetResponseFunctionsCalled) {
-                        mHidlSetResponseFunctionsCalled = true;
+                    if (!mIsRadioProxyInitialized) {
+                        mIsRadioProxyInitialized = true;
+                        mRadioProxy.linkToDeath(mRadioProxyDeathRecipient,
+                                mServiceCookies.get(RADIO_SERVICE).incrementAndGet());
                         mRadioProxy.setResponseFunctions(mRadioResponse, mRadioIndication);
                     }
                 } else {
@@ -964,10 +965,10 @@ public class RIL extends BaseCommands implements CommandsInterface {
                         if (mRadioVersion.greaterOrEqual(RADIO_HAL_VERSION_2_0)) {
                             throw new AssertionError("serviceProxy shouldn't be HIDL with HAL 2.0");
                         }
-                        serviceProxy.getHidl().linkToDeath(mRadioProxyDeathRecipient,
-                                mServiceCookies.get(service).incrementAndGet());
-                        if (!mHidlSetResponseFunctionsCalled) {
-                            mHidlSetResponseFunctionsCalled = true;
+                        if (!mIsRadioProxyInitialized) {
+                            mIsRadioProxyInitialized = true;
+                            serviceProxy.getHidl().linkToDeath(mRadioProxyDeathRecipient,
+                                    mServiceCookies.get(service).incrementAndGet());
                             serviceProxy.getHidl().setResponseFunctions(
                                     mRadioResponse, mRadioIndication);
                         }
@@ -998,7 +999,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
 
     @Override
     public synchronized void onSlotActiveStatusChange(boolean active) {
-        mHidlSetResponseFunctionsCalled = false;
+        mIsRadioProxyInitialized = false;
         for (int service = MIN_SERVICE_IDX; service <= MAX_SERVICE_IDX; service++) {
             if (active) {
                 // Try to connect to RIL services and set response functions.
@@ -1162,6 +1163,8 @@ public class RIL extends BaseCommands implements CommandsInterface {
 
     private void addRequest(RILRequest rr) {
         acquireWakeLock(rr, FOR_WAKELOCK);
+        Trace.asyncTraceForTrackBegin(
+                Trace.TRACE_TAG_NETWORK, "RIL", RILUtils.requestToString(rr.mRequest), rr.mSerial);
         synchronized (mRequestList) {
             rr.mStartTimeMs = SystemClock.elapsedRealtime();
             mRequestList.append(rr.mSerial, rr);
@@ -1184,7 +1187,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
     private void handleRadioProxyExceptionForRR(int service, String caller, Exception e) {
         riljLoge(caller + ": " + e);
         e.printStackTrace();
-        mHidlSetResponseFunctionsCalled = false;
+        mIsRadioProxyInitialized = false;
         resetProxyAndRequestList(service);
     }
 
@@ -5186,6 +5189,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
                     + " ,error: " + error);
             return null;
         }
+        Trace.asyncTraceForTrackEnd(Trace.TRACE_TAG_NETWORK, "RIL", "" /* unused */, rr.mSerial);
 
         // Time logging for RIL command and storing it in TelephonyHistogram.
         addToRilHistogram(rr);
@@ -5732,43 +5736,43 @@ public class RIL extends BaseCommands implements CommandsInterface {
         int response = RIL_UNSOL_CDMA_INFO_REC;
         if (infoRec.record instanceof CdmaInformationRecords.CdmaDisplayInfoRec) {
             if (mDisplayInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mDisplayInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaSignalInfoRec) {
             if (mSignalInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mSignalInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaNumberInfoRec) {
             if (mNumberInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mNumberInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaRedirectingNumberInfoRec) {
             if (mRedirNumInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mRedirNumInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaLineControlInfoRec) {
             if (mLineControlInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mLineControlInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaT53ClirInfoRec) {
             if (mT53ClirInfoRegistrants != null) {
-                if (RILJ_LOGD) unsljLogRet(response, infoRec.record);
+                if (isLogOrTrace()) unsljLogRet(response, infoRec.record);
                 mT53ClirInfoRegistrants.notifyRegistrants(
                         new AsyncResult(null, infoRec.record, null));
             }
         } else if (infoRec.record instanceof CdmaInformationRecords.CdmaT53AudioControlInfoRec) {
             if (mT53AudCntrlInfoRegistrants != null) {
-                if (RILJ_LOGD) {
+                if (isLogOrTrace()) {
                     unsljLogRet(response, infoRec.record);
                 }
                 mT53AudCntrlInfoRegistrants.notifyRegistrants(
@@ -5790,26 +5794,48 @@ public class RIL extends BaseCommands implements CommandsInterface {
         Rlog.v(RILJ_LOG_TAG, msg + (" [PHONE" + mPhoneId + "]"));
     }
 
+    boolean isLogOrTrace() {
+        return RIL.RILJ_LOGD || Trace.isTagEnabled(Trace.TRACE_TAG_NETWORK);
+    }
+
+    boolean isLogvOrTrace() {
+        return RIL.RILJ_LOGV || Trace.isTagEnabled(Trace.TRACE_TAG_NETWORK);
+    }
+
     @UnsupportedAppUsage
     void unsljLog(int response) {
-        riljLog("[UNSL]< " + RILUtils.responseToString(response));
+        String logStr = RILUtils.responseToString(response);
+        if (RIL.RILJ_LOGD) {
+            riljLog("[UNSL]< " + logStr);
+        }
+        Trace.instantForTrack(Trace.TRACE_TAG_NETWORK, "RIL", logStr);
     }
 
     @UnsupportedAppUsage
     void unsljLogMore(int response, String more) {
-        riljLog("[UNSL]< " + RILUtils.responseToString(response) + " " + more);
+        String logStr = RILUtils.responseToString(response) + " " + more;
+        if (RIL.RILJ_LOGD) {
+            riljLog("[UNSL]< " + logStr);
+        }
+        Trace.instantForTrack(Trace.TRACE_TAG_NETWORK, "RIL", logStr);
     }
 
     @UnsupportedAppUsage
     void unsljLogRet(int response, Object ret) {
-        riljLog("[UNSL]< " + RILUtils.responseToString(response) + " "
-                + retToString(response, ret));
+        String logStr = RILUtils.responseToString(response) + " " + retToString(response, ret);
+        if (RIL.RILJ_LOGD) {
+            riljLog("[UNSL]< " + logStr);
+        }
+        Trace.instantForTrack(Trace.TRACE_TAG_NETWORK, "RIL", logStr);
     }
 
     @UnsupportedAppUsage
     void unsljLogvRet(int response, Object ret) {
-        riljLogv("[UNSL]< " + RILUtils.responseToString(response) + " "
-                + retToString(response, ret));
+        String logStr = RILUtils.responseToString(response) + " " + retToString(response, ret);
+        if (RIL.RILJ_LOGV) {
+            riljLogv("[UNSL]< " + logStr);
+        }
+        Trace.instantForTrack(Trace.TRACE_TAG_NETWORK, "RIL", logStr);
     }
 
     @Override

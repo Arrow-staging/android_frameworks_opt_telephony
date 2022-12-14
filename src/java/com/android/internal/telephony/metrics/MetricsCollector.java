@@ -683,7 +683,8 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                     perSimStatus.disabled2g, // is2gDisabled
                     perSimStatus.pin1Enabled, // isPin1Enabled
                     perSimStatus.minimumVoltageClass, // simVoltageClass
-                    perSimStatus.userModifiedApnTypes); // userModifiedApnTypeBitmask
+                    perSimStatus.userModifiedApnTypes, // userModifiedApnTypeBitmask
+                    perSimStatus.unmeteredNetworks); // unmeteredNetworks
             data.add(statsEvent);
             result = StatsManager.PULL_SUCCESS;
         }
@@ -717,7 +718,8 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 state.simSlotIndex,
                 state.isMultiSim,
                 state.carrierId,
-                (int) (round(state.totalTimeMillis, DURATION_BUCKET_MILLIS) / SECOND_IN_MILLIS));
+                (int) (round(state.totalTimeMillis, DURATION_BUCKET_MILLIS) / SECOND_IN_MILLIS),
+                state.isEmergencyOnly);
     }
 
     private static StatsEvent buildStatsEvent(VoiceCallRatUsage usage) {
@@ -785,7 +787,8 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 sms.isMultiSim,
                 sms.isEsim,
                 sms.carrierId,
-                sms.messageId);
+                sms.messageId,
+                sms.count);
     }
 
     private static StatsEvent buildStatsEvent(OutgoingSms sms) {
@@ -803,7 +806,9 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 sms.isEsim,
                 sms.carrierId,
                 sms.messageId,
-                sms.retryId);
+                sms.retryId,
+                sms.intervalMillis,
+                sms.count);
     }
 
     private static StatsEvent buildStatsEvent(DataCallSession dataCallSession) {
@@ -828,7 +833,8 @@ public class MetricsCollector implements StatsManager.StatsPullAtomCallback {
                 round(dataCallSession.durationMinutes, DURATION_BUCKET_MILLIS / MINUTE_IN_MILLIS),
                 dataCallSession.ongoing,
                 dataCallSession.bandAtEnd,
-                dataCallSession.handoverFailureCauses);
+                dataCallSession.handoverFailureCauses,
+                dataCallSession.handoverFailureRat);
     }
 
     private static StatsEvent buildStatsEvent(ImsRegistrationStats stats) {
